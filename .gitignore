@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Axis runtime state and generated filesystems
+.axis/
+rootfs/
+
+# Build outputs
+namespace_test
+runtime/axis-runtime
+*.o
+*.out
+
+# Local editor and OS files
+.vscode/
+.DS_Store
+*.swp
+*.swo
+
+# Logs
+*.log

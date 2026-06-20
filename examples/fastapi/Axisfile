@@ -1,0 +1,9 @@
+FROM python:3.11-slim
+NAME fastapi-demo
+WORKDIR /
+COPY app.py /app.py
+EXPOSE 8000
+PORT 8000:8000
+MEMORY 512M
+CPU 100000 100000
+CMD python3 /app.py
