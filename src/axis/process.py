@@ -5,7 +5,9 @@ import subprocess
 from .errors import CommandError
 
 
-def run(command: list[str], *, capture: bool = False, input_bytes: bytes | None = None) -> subprocess.CompletedProcess[str]:
+def run(
+    command: list[str], *, capture: bool = False, input_bytes: bytes | None = None
+) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
             command,

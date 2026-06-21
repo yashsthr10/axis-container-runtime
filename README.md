@@ -45,7 +45,9 @@ PYTHONPATH=src python3 -m axis.cli stop restart-demo
 ## Developer Commands
 
 ```bash
+make format
 make test
+make coverage
 PYTHONPATH=src python3 -m axis.cli ps
 PYTHONPATH=src python3 -m axis.cli reconcile
 PYTHONPATH=src python3 -m axis.cli stop <container>

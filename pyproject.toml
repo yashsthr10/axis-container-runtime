@@ -11,9 +11,27 @@ requires-python = ">=3.11"
 [project.scripts]
 axis = "axis.cli:main"
 
+[project.optional-dependencies]
+dev = [
+    "black",
+    "coverage",
+]
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["axis*"]
+
+[tool.black]
+line-length = 120
+target-version = ["py311"]
+
+[tool.coverage.run]
+branch = true
+source = ["src/axis"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

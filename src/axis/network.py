@@ -55,7 +55,9 @@ def setup_network(container_id: str, pid: int, config: AxisConfig, rootfs: Path)
 
     run(["sysctl", "-w", "net.ipv4.ip_forward=1"])
     outbound = default_interface()
-    ensure_iptables(["iptables", "-t", "nat", "-A", "POSTROUTING", "-s", str(SUBNET), "-o", outbound, "-j", "MASQUERADE"])
+    ensure_iptables(
+        ["iptables", "-t", "nat", "-A", "POSTROUTING", "-s", str(SUBNET), "-o", outbound, "-j", "MASQUERADE"]
+    )
     ensure_iptables(["iptables", "-A", "FORWARD", "-i", BRIDGE, "-o", outbound, "-j", "ACCEPT"])
     failpoint("after-iptables")
     ensure_iptables(
@@ -193,12 +195,7 @@ def publish_port(mapping: PortMapping, container_ip: str) -> None:
 
 def remove_published_port_rules(mapping: PortMapping) -> None:
     for line in iptables_save("nat"):
-        if (
-            line.startswith("-A OUTPUT ")
-            and "--dport" in line
-            and str(mapping.host) in line
-            and "-j DNAT" in line
-        ):
+        if line.startswith("-A OUTPUT ") and "--dport" in line and str(mapping.host) in line and "-j DNAT" in line:
             delete_saved_rule("nat", line)
         elif (
             line.startswith("-A POSTROUTING ")

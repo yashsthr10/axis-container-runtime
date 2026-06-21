@@ -16,11 +16,7 @@ def volume_message():
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         print(f"handled GET {self.path}", flush=True)
-        body = (
-            "hello from axis\n"
-            f"env={os.environ.get('APP_ENV', '')}\n"
-            f"volume={volume_message()}\n"
-        ).encode()
+        body = ("hello from axis\n" f"env={os.environ.get('APP_ENV', '')}\n" f"volume={volume_message()}\n").encode()
         self.send_response(200)
         self.send_header("content-type", "text/plain")
         self.send_header("content-length", str(len(body)))

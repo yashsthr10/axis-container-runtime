@@ -15,6 +15,13 @@ make test
 PYTHONPATH=src python3 -m unittest discover
 ```
 
+Format Python code and view unit test coverage:
+
+```bash
+make format
+make coverage
+```
+
 Run the example container:
 
 ```bash

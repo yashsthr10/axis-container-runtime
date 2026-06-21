@@ -212,7 +212,9 @@ def reconcile_command() -> int:
                     write_json(state.network_file, network)
                     repaired.append(f"{state.container_id}: pruned stale proxy pids")
                 except PermissionError:
-                    repaired.append(f"{state.container_id}: stale proxy pids detected, rerun reconcile as root to repair")
+                    repaired.append(
+                        f"{state.container_id}: stale proxy pids detected, rerun reconcile as root to repair"
+                    )
 
     for line in repaired:
         print(line)

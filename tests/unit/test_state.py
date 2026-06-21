@@ -4,7 +4,15 @@ import unittest
 from pathlib import Path
 
 from axis.errors import AxisError
-from axis.state import add_resource, inspect_container, read_resources, resolve_container, transition_state, write_json, write_status
+from axis.state import (
+    add_resource,
+    inspect_container,
+    read_resources,
+    resolve_container,
+    transition_state,
+    write_json,
+    write_status,
+)
 
 
 class StateTests(unittest.TestCase):
