@@ -1,19 +1,25 @@
-.PHONY: build run ps test clean clean-net
+.PHONY: build run run-fastapi run-restart ps test clean clean-net
 
 build:
-	$(MAKE) -C runtime
+	$(MAKE) -C src/runtime
 
 run: build
-	sudo python3 -m axis.cli run
+	sudo PYTHONPATH=src python3 -m axis.cli run
+
+run-fastapi: build
+	sudo PYTHONPATH=src python3 -m axis.cli run -f examples/fastapi/Axisfile
+
+run-restart: build
+	sudo PYTHONPATH=src python3 -m axis.cli run -f examples/restart/Axisfile
 
 ps:
-	python3 -m axis.cli ps
+	PYTHONPATH=src python3 -m axis.cli ps
 
 test:
-	python3 -m unittest discover -s tests/unit
+	PYTHONPATH=src python3 -m unittest discover -s tests/unit
 
 clean:
-	rm -f runtime/axis-runtime namespace_test
+	rm -f src/runtime/axis-runtime namespace_test
 
 clean-net:
 	sudo ip link delete axis0 2>/dev/null || true

@@ -8,7 +8,9 @@ Axis is a small educational container runtime. It reads a Dockerfile-like `Axisf
 FROM python:3.11-slim
 NAME fastapi-demo
 WORKDIR /
-COPY examples/fastapi/app.py /app.py
+COPY app.py /app.py
+VOLUME ./data:/data
+ENV APP_ENV=example
 EXPOSE 8000
 PORT 8000:8000
 MEMORY 512M
@@ -20,19 +22,30 @@ CMD python3 /app.py
 
 ```bash
 make build
-sudo python3 -m axis.cli run
+sudo PYTHONPATH=src python3 -m axis.cli run -f examples/fastapi/Axisfile
 ```
 
-Then open:
+Then test the HTTP server and bind mount:
 
-```text
-http://localhost:8000
+```bash
+curl http://localhost:8000
+PYTHONPATH=src python3 -m axis.cli inspect fastapi-demo
+PYTHONPATH=src python3 -m axis.cli logs fastapi-demo
+```
+
+Test restart policy with the crash-loop example:
+
+```bash
+sudo PYTHONPATH=src python3 -m axis.cli run -f examples/restart/Axisfile
+PYTHONPATH=src python3 -m axis.cli logs -f restart-demo
+PYTHONPATH=src python3 -m axis.cli stop restart-demo
 ```
 
 ## Developer Commands
 
 ```bash
 make test
-python3 -m axis.cli ps
-python3 -m axis.cli clean <container-id>
+PYTHONPATH=src python3 -m axis.cli ps
+PYTHONPATH=src python3 -m axis.cli stop <container>
+PYTHONPATH=src python3 -m axis.cli clean <container>
 ```

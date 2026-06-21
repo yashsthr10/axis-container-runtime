@@ -1,0 +1,6 @@
+FROM python:3.11-slim
+NAME restart-demo
+WORKDIR /
+COPY crash.py /crash.py
+RESTART always
+CMD python3 /crash.py

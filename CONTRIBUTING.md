@@ -12,13 +12,13 @@ Run unit tests:
 
 ```bash
 make test
-python3 -m unittest discover
+PYTHONPATH=src python3 -m unittest discover
 ```
 
 Run the example container:
 
 ```bash
-sudo python3 -m axis.cli run -f examples/fastapi/Axisfile
+sudo PYTHONPATH=src python3 -m axis.cli run -f examples/fastapi/Axisfile
 ```
 
 ## Notes

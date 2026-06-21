@@ -22,7 +22,7 @@ rootfs/
 
 # Build outputs
 namespace_test
-runtime/axis-runtime
+src/runtime/axis-runtime
 *.o
 *.out
 

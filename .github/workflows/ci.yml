@@ -27,4 +27,4 @@ jobs:
         run: make test
 
       - name: Run full test discovery
-        run: python -m unittest discover
+        run: PYTHONPATH=src python -m unittest discover
