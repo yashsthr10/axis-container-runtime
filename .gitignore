@@ -21,7 +21,6 @@ env/
 rootfs/
 
 # Build outputs
-namespace_test
 src/runtime/axis-runtime
 *.o
 *.out

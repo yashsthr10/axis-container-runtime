@@ -4,7 +4,7 @@ build:
 	$(MAKE) -C src/runtime
 
 run: build
-	sudo PYTHONPATH=src python3 -m axis.cli run
+	sudo PYTHONPATH=src python3 -m axis.cli run -f examples/fastapi/Axisfile
 
 run-fastapi: build
 	sudo PYTHONPATH=src python3 -m axis.cli run -f examples/fastapi/Axisfile
@@ -19,7 +19,7 @@ test:
 	PYTHONPATH=src python3 -m unittest discover -s tests/unit
 
 clean:
-	rm -f src/runtime/axis-runtime namespace_test
+	rm -f src/runtime/axis-runtime
 
 clean-net:
 	sudo ip link delete axis0 2>/dev/null || true
