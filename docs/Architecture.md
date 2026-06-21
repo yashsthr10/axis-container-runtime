@@ -54,16 +54,17 @@ Python:
 - Parse and validate `Axisfile`.
 - Pull/export Docker images into rootfs directories.
 - Copy local files into the rootfs.
-- Persist container state.
+- Persist lifecycle state, resource ownership, logs, runtime config, and network metadata.
 - Start and monitor `src/runtime/axis-runtime`.
 - Configure bridge networking and localhost port proxies.
-- Capture logs and answer `ps`, `inspect`, `logs`, `stop`, and `clean`.
+- Capture logs and answer `ps`, `inspect`, `logs`, `stats`, `reconcile`, `stop`, and `clean`.
 - Implement foreground `RESTART always`.
 
 C++:
 
 - Parse runtime JSON.
 - `clone()` the container process with PID, mount, UTS, and network namespaces.
+- Run a tiny PID 1 init path that forks the configured app, forwards signals, and reaps child processes.
 - Set hostname.
 - Make mount propagation private.
 - Apply bind mounts before `chroot`.
@@ -74,9 +75,34 @@ C++:
 
 ## Reliability Model
 
-Axis is intentionally simple. It has no daemon, no database, and no background reconciler. State can become stale if the host reboots or the process is killed abruptly. Commands use the persisted PID plus `os.kill(pid, 0)` to distinguish live processes from stale PID files where possible.
+Axis is still a local CLI runtime, but it now has several production-hardening primitives:
+
+- Lifecycle state is persisted with state, desired state, timestamps, exit details, restart count, and manual stop intent.
+- State writes are atomic, and per-container locks protect lifecycle and resource journal writes.
+- `.axis/containers/<id>/resources.json` records owned resources such as rootfs, cgroups, veths, IPs, proxies, and bind mounts.
+- `axis stats` reads cgroup v2 resource counters.
+- `axis reconcile` repairs simple stale metadata such as dead running PIDs and stale proxy PID entries.
+- Network IP allocation is protected by a file lock, and IPs are released during network cleanup.
+- The Python localhost proxy handles concurrent client connections.
 
 `RESTART always` is foreground supervision only. If the attached `axis run` command exits, restart supervision stops.
+
+Axis still has no daemon. Full recovery after CLI exit or host reboot is limited to explicit `axis reconcile`; a future `axisd` should own long-lived supervision, event history, and serialized command handling.
+
+## Failure Injection
+
+The runtime supports failpoints for testing partial setup and cleanup behavior:
+
+- `after-rootfs-create`
+- `before-runtime-start`
+- `after-runtime-start`
+- `after-network-setup`
+- `after-proxy-start`
+- `after-veth-create`
+- `after-iptables`
+- `after-cgroup-create`
+
+Use them with `AXIS_FAILPOINT=<name>` during tests.
 
 ## Security Boundary
 

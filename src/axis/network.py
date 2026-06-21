@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import ipaddress
+import fcntl
 import json
+import os
 import shlex
 import subprocess
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Iterator
 
 from .config import AxisConfig
 from .ports import PortMapping
@@ -16,10 +20,12 @@ BRIDGE = "axis0"
 SUBNET = ipaddress.ip_network("10.88.0.0/24")
 GATEWAY = ipaddress.ip_address("10.88.0.1")
 NETWORK_STATE = Path(".axis/networks/axis0.json")
+NETWORK_LOCK = Path(".axis/locks/network-axis0.lock")
 
 
 @dataclass(frozen=True)
 class NetworkState:
+    container_id: str
     bridge: str
     host_veth: str
     container_veth: str
@@ -38,6 +44,7 @@ def setup_network(container_id: str, pid: int, config: AxisConfig, rootfs: Path)
 
     _run_ok(["ip", "link", "delete", host_veth])
     run(["ip", "link", "add", host_veth, "type", "veth", "peer", "name", container_veth])
+    failpoint("after-veth-create")
     run(["ip", "link", "set", host_veth, "master", BRIDGE])
     run(["ip", "link", "set", host_veth, "up"])
     run(["ip", "link", "set", container_veth, "netns", str(pid)])
@@ -50,6 +57,7 @@ def setup_network(container_id: str, pid: int, config: AxisConfig, rootfs: Path)
     outbound = default_interface()
     ensure_iptables(["iptables", "-t", "nat", "-A", "POSTROUTING", "-s", str(SUBNET), "-o", outbound, "-j", "MASQUERADE"])
     ensure_iptables(["iptables", "-A", "FORWARD", "-i", BRIDGE, "-o", outbound, "-j", "ACCEPT"])
+    failpoint("after-iptables")
     ensure_iptables(
         [
             "iptables",
@@ -73,6 +81,7 @@ def setup_network(container_id: str, pid: int, config: AxisConfig, rootfs: Path)
         remove_published_port_rules(mapping)
 
     return NetworkState(
+        container_id=container_id,
         bridge=BRIDGE,
         host_veth=host_veth,
         container_veth=container_veth,
@@ -91,24 +100,30 @@ def ensure_bridge() -> None:
 
 
 def allocate_ip(container_id: str) -> ipaddress.IPv4Address:
-    NETWORK_STATE.parent.mkdir(parents=True, exist_ok=True)
-    state = {"allocations": {}}
-    if NETWORK_STATE.exists():
-        state = json.loads(NETWORK_STATE.read_text())
+    with network_lock():
+        state = read_network_state()
+        allocations = state.setdefault("allocations", {})
+        if container_id in allocations:
+            return ipaddress.ip_address(allocations[container_id])
 
-    allocations = state.setdefault("allocations", {})
-    if container_id in allocations:
-        return ipaddress.ip_address(allocations[container_id])
-
-    used = {ipaddress.ip_address(value) for value in allocations.values()}
-    for candidate in SUBNET.hosts():
-        if candidate == GATEWAY or candidate in used:
-            continue
-        allocations[container_id] = str(candidate)
-        NETWORK_STATE.write_text(json.dumps(state, indent=2) + "\n")
-        return candidate
+        used = {ipaddress.ip_address(value) for value in allocations.values()}
+        for candidate in SUBNET.hosts():
+            if candidate == GATEWAY or candidate in used:
+                continue
+            allocations[container_id] = str(candidate)
+            write_network_state(state)
+            return candidate
 
     raise RuntimeError(f"No available addresses in {SUBNET}")
+
+
+def release_ip(container_id: str) -> None:
+    with network_lock():
+        state = read_network_state()
+        allocations = state.setdefault("allocations", {})
+        if container_id in allocations:
+            del allocations[container_id]
+            write_network_state(state)
 
 
 def default_interface() -> str:
@@ -244,6 +259,10 @@ def cleanup_network(network: dict) -> None:
     if host_veth:
         _run_ok(["ip", "link", "delete", host_veth])
 
+    container_id = network.get("container_id")
+    if container_id:
+        release_ip(str(container_id))
+
 
 def to_jsonable(network: NetworkState) -> dict:
     value = asdict(network)
@@ -253,3 +272,32 @@ def to_jsonable(network: NetworkState) -> dict:
 
 def _run_ok(command: list[str]) -> int:
     return subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode
+
+
+@contextmanager
+def network_lock() -> Iterator[None]:
+    NETWORK_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with NETWORK_LOCK.open("a+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def read_network_state() -> dict:
+    NETWORK_STATE.parent.mkdir(parents=True, exist_ok=True)
+    if not NETWORK_STATE.exists():
+        return {"allocations": {}}
+    return json.loads(NETWORK_STATE.read_text())
+
+
+def write_network_state(state: dict) -> None:
+    temp_path = NETWORK_STATE.with_name(f".{NETWORK_STATE.name}.{os.getpid()}.tmp")
+    temp_path.write_text(json.dumps(state, indent=2) + "\n")
+    os.replace(temp_path, NETWORK_STATE)
+
+
+def failpoint(name: str) -> None:
+    if os.environ.get("AXIS_FAILPOINT") == name:
+        raise RuntimeError(f"failpoint triggered: {name}")

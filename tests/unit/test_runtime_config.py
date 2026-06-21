@@ -24,6 +24,8 @@ class RuntimeConfigTests(unittest.TestCase):
                 network_file=directory / "network.json",
                 log_file=directory / "logs.txt",
                 status_file=directory / "status.json",
+                resource_file=directory / "resources.json",
+                lock_file=directory / "container.lock",
             )
             state.rootfs.mkdir()
             volume_source = directory / "data"

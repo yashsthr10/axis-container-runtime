@@ -1,16 +1,30 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import shutil
 import uuid
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Iterator
 
 from .errors import AxisError
 
 
 STATE_DIR = Path(".axis")
+VALID_STATES = {"created", "starting", "running", "stopping", "exited", "failed", "deleted"}
+ALLOWED_TRANSITIONS = {
+    "created": {"starting", "running", "failed", "deleted"},
+    "starting": {"running", "failed", "deleted"},
+    "running": {"stopping", "exited", "failed", "deleted"},
+    "stopping": {"exited", "failed", "deleted"},
+    "exited": {"starting", "deleted"},
+    "failed": {"starting", "deleted"},
+    "deleted": set(),
+}
 
 
 @dataclass(frozen=True)
@@ -25,6 +39,8 @@ class ContainerState:
     network_file: Path
     log_file: Path
     status_file: Path
+    resource_file: Path
+    lock_file: Path
 
 
 def create_container_state(name: str) -> ContainerState:
@@ -45,11 +61,13 @@ def create_container_state(name: str) -> ContainerState:
         network_file=directory / "network.json",
         log_file=directory / "logs.txt",
         status_file=directory / "status.json",
+        resource_file=directory / "resources.json",
+        lock_file=directory / "container.lock",
     )
 
 
 def init_state_dirs() -> None:
-    for path in (STATE_DIR / "images", STATE_DIR / "containers", STATE_DIR / "networks"):
+    for path in (STATE_DIR / "images", STATE_DIR / "containers", STATE_DIR / "networks", STATE_DIR / "locks"):
         path.mkdir(parents=True, exist_ok=True)
 
 
@@ -58,7 +76,13 @@ def copy_axisfile(source: Path, state: ContainerState) -> None:
 
 
 def write_json(path: Path, value: object) -> None:
-    path.write_text(json.dumps(value, indent=2) + "\n")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    with temp_path.open("w") as file:
+        file.write(json.dumps(value, indent=2) + "\n")
+        file.flush()
+        os.fsync(file.fileno())
+    os.replace(temp_path, path)
 
 
 def read_json(path: Path) -> dict:
@@ -83,6 +107,8 @@ def container_state_from_dir(container_dir: Path) -> ContainerState:
         network_file=container_dir / "network.json",
         log_file=container_dir / "logs.txt",
         status_file=container_dir / "status.json",
+        resource_file=container_dir / "resources.json",
+        lock_file=container_dir / "container.lock",
     )
 
 
@@ -133,15 +159,105 @@ def pid_alive(pid: int | None) -> bool:
     return True
 
 
+@contextmanager
+def container_lock(state: ContainerState) -> Iterator[None]:
+    state.lock_file.parent.mkdir(parents=True, exist_ok=True)
+    with state.lock_file.open("a+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def utc_now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def default_status(state: str = "created") -> dict:
+    now = utc_now()
+    return {
+        "state": state,
+        "status": state,
+        "desired_state": "running" if state in {"created", "starting", "running"} else state,
+        "pid": None,
+        "exit_code": None,
+        "exit_signal": None,
+        "exit_reason": None,
+        "oom_killed": False,
+        "started_at": None,
+        "finished_at": None,
+        "updated_at": now,
+        "restart_count": 0,
+        "manual_stop": False,
+    }
+
+
+def normalize_status(payload: dict | None) -> dict:
+    status = default_status()
+    if payload:
+        status.update(payload)
+    state = status.get("state") or status.get("status") or "created"
+    status["state"] = state
+    status["status"] = state
+    return status
+
+
 def write_status(state: ContainerState, status: str, **extra: object) -> None:
-    payload = {"status": status, **extra}
+    payload = normalize_status(read_status(state))
+    payload.update(extra)
+    payload["state"] = status
+    payload["status"] = status
+    payload["updated_at"] = utc_now()
     write_json(state.status_file, payload)
 
 
 def read_status(state: ContainerState) -> dict:
     if not state.status_file.exists():
-        return {}
-    return read_json(state.status_file)
+        return default_status()
+    return normalize_status(read_json(state.status_file))
+
+
+def transition_state(state: ContainerState, target: str, **extra: object) -> dict:
+    if target not in VALID_STATES:
+        raise AxisError(f"Invalid container state: {target}")
+
+    with container_lock(state):
+        current = read_status(state)
+        current_state = current["state"]
+        if target != current_state and target not in ALLOWED_TRANSITIONS.get(current_state, set()):
+            raise AxisError(f"Invalid container state transition: {current_state} -> {target}")
+
+        payload = normalize_status(current)
+        payload.update(extra)
+        payload["state"] = target
+        payload["status"] = target
+        payload["updated_at"] = utc_now()
+        if target == "running" and not payload.get("started_at"):
+            payload["started_at"] = payload["updated_at"]
+        if target in {"exited", "failed", "deleted"} and not payload.get("finished_at"):
+            payload["finished_at"] = payload["updated_at"]
+
+        write_json(state.status_file, payload)
+        return payload
+
+
+def read_resources(state: ContainerState) -> list[dict]:
+    if not state.resource_file.exists():
+        return []
+    return read_json(state.resource_file).get("resources", [])
+
+
+def write_resources(state: ContainerState, resources: list[dict]) -> None:
+    write_json(state.resource_file, {"resources": resources})
+
+
+def add_resource(state: ContainerState, resource: dict) -> None:
+    with container_lock(state):
+        resources = read_resources(state)
+        if resource not in resources:
+            resources.append(resource)
+            write_resources(state, resources)
 
 
 def inspect_container(reference: str) -> dict:
@@ -165,7 +281,13 @@ def inspect_container(reference: str) -> dict:
         "ip": network.get("container_ip"),
         "ports": ports,
         "memory": runtime.get("memory"),
-        "status": "running" if running else status.get("status", "unknown"),
+        "status": "running" if running else status.get("state", "unknown"),
+        "desired_state": status.get("desired_state"),
+        "exit_code": status.get("exit_code"),
+        "exit_signal": status.get("exit_signal"),
+        "exit_reason": status.get("exit_reason"),
+        "oom_killed": status.get("oom_killed", False),
+        "restart_count": status.get("restart_count", 0),
     }
 
 

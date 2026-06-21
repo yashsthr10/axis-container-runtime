@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import selectors
 import socket
+import threading
 
 
 BUFFER_SIZE = 65536
@@ -29,7 +30,7 @@ def main() -> int:
                 client.close()
                 continue
 
-            proxy_connection(client, target)
+            threading.Thread(target=proxy_connection, args=(client, target), daemon=True).start()
 
 
 def proxy_connection(left: socket.socket, right: socket.socket) -> None:

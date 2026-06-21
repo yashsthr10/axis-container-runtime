@@ -11,6 +11,8 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <csignal>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <iostream>
@@ -21,6 +23,16 @@ struct ChildArgs {
     int syncPipeRead;
     const RuntimeConfig* config;
 };
+
+volatile sig_atomic_t appPid = -1;
+
+void forwardSignal(int signal)
+{
+    pid_t pid = static_cast<pid_t>(appPid);
+    if (pid > 0) {
+        kill(pid, signal);
+    }
+}
 
 bool writeFile(const std::string& path, const std::string& value)
 {
@@ -123,6 +135,12 @@ bool setupCgroup(pid_t pid, const RuntimeConfig& config)
         return false;
     }
 
+    const char* failpoint = getenv("AXIS_FAILPOINT");
+    if (failpoint != nullptr && std::string(failpoint) == "after-cgroup-create") {
+        std::cerr << "failpoint triggered: after-cgroup-create\n";
+        return false;
+    }
+
     if (!config.memory.empty() && !writeFile(config.cgroupPath + "/memory.max", config.memory)) {
         std::cerr << "Warning: memory limit was not applied\n";
     }
@@ -132,6 +150,65 @@ bool setupCgroup(pid_t pid, const RuntimeConfig& config)
     }
 
     return writeFile(config.cgroupPath + "/cgroup.procs", std::to_string(pid));
+}
+
+int statusToExitCode(int status)
+{
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+    if (WIFSIGNALED(status)) {
+        return 128 + WTERMSIG(status);
+    }
+    return 1;
+}
+
+int runInit(std::vector<char*>& argv)
+{
+    struct sigaction action {};
+    action.sa_handler = forwardSignal;
+    sigemptyset(&action.sa_mask);
+    sigaction(SIGTERM, &action, nullptr);
+    sigaction(SIGINT, &action, nullptr);
+    sigaction(SIGQUIT, &action, nullptr);
+    sigaction(SIGHUP, &action, nullptr);
+
+    pid_t childPid = fork();
+    if (childPid == -1) {
+        std::cerr << "fork failed: " << strerror(errno) << "\n";
+        return 1;
+    }
+
+    if (childPid == 0) {
+        execvp(argv[0], argv.data());
+        std::cerr << "execvp failed: " << strerror(errno) << "\n";
+        return 127;
+    }
+
+    appPid = childPid;
+    int appStatus = 0;
+    bool appExited = false;
+
+    while (true) {
+        int status = 0;
+        pid_t reaped = waitpid(-1, &status, 0);
+        if (reaped == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
+            if (errno == ECHILD) {
+                return appExited ? statusToExitCode(appStatus) : 1;
+            }
+            std::cerr << "waitpid failed: " << strerror(errno) << "\n";
+            return 1;
+        }
+
+        if (reaped == childPid) {
+            appStatus = status;
+            appExited = true;
+            appPid = -1;
+        }
+    }
 }
 
 int child(void* arg)
@@ -191,9 +268,7 @@ int child(void* arg)
     }
     argv.push_back(nullptr);
 
-    execvp(argv[0], argv.data());
-    std::cerr << "execvp failed: " << strerror(errno) << "\n";
-    return 1;
+    return runInit(argv);
 }
 
 int main(int argc, char** argv)
@@ -260,5 +335,5 @@ int main(int argc, char** argv)
 
     int status = 0;
     waitpid(pid, &status, 0);
-    return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+    return statusToExitCode(status);
 }

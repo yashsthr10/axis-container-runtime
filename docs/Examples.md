@@ -82,6 +82,12 @@ After running `curl http://localhost:8000`, read the captured stdout/stderr:
 PYTHONPATH=src python3 -m axis.cli logs fastapi-demo
 ```
 
+Read cgroup stats:
+
+```bash
+PYTHONPATH=src python3 -m axis.cli stats fastapi-demo
+```
+
 Follow logs:
 
 ```bash
@@ -166,6 +172,12 @@ List containers:
 
 ```bash
 PYTHONPATH=src python3 -m axis.cli ps
+```
+
+Reconcile stale runtime metadata:
+
+```bash
+PYTHONPATH=src python3 -m axis.cli reconcile
 ```
 
 Stop running examples:

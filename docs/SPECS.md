@@ -40,10 +40,14 @@ Stops by exact container ID or unique name.
 
 Behavior:
 
-- Reads the stored PID.
+- Accepts `--timeout`, defaulting to 30 seconds.
+- Resolves exact container ID or unique name.
 - Writes `manual_stop=true`.
-- Sends `SIGTERM`.
-- Marks status `stopped`.
+- Transitions the container toward `stopping`.
+- Uses cgroup process ownership when available.
+- Sends `SIGTERM`, waits, and escalates to `SIGKILL` if needed.
+- Does not restart containers stopped manually.
+- Succeeds for already-exited containers.
 
 ### `axis inspect <container>`
 
@@ -73,9 +77,57 @@ Prints captured combined stdout/stderr.
 - Without `--follow`, prints existing `logs.txt` and exits.
 - With `--follow`, polls the file for new lines.
 
+### `axis stats <container>`
+
+Prints cgroup v2 resource counters when the container cgroup exists.
+
+Fields may include:
+
+- `memory_current`
+- `memory_peak`
+- `memory_max`
+- `memory_events`
+- `cpu_stat`
+- `pids_current`
+- `pids_max`
+- `cgroup_events`
+- `io_stat`
+
+### `axis reconcile`
+
+Scans persisted state and repairs simple stale metadata, such as dead running PIDs and stale proxy PID entries.
+
+If `.axis` state is root-owned and the command is not run as root, reconcile reports repairs that require root instead of crashing.
+
 ### `axis clean <container>`
 
 Removes a known container state directory after best-effort runtime/network cleanup.
+
+Cleanup uses persisted ownership metadata when available and is intended to be idempotent for missing processes, missing veths, already-released IPs, and already-removed state.
+
+## Runtime State And Ownership
+
+Per-container state lives under `.axis/containers/<id>/`.
+
+Important files:
+
+- `status.json`: lifecycle state, desired state, timestamps, exit details, restart count, and manual stop intent.
+- `resources.json`: owned resources such as rootfs, cgroup path, veth, IP allocation, proxy PIDs, and bind mounts.
+- `runtime.json`: Python-to-C++ runtime contract.
+- `network.json`: bridge, veth, IP, ports, and proxy metadata.
+- `logs.txt`: combined runtime stdout/stderr.
+
+Lifecycle states:
+
+- `created`
+- `starting`
+- `running`
+- `stopping`
+- `exited`
+- `failed`
+- `deleted`
+
+State writes should be atomic and transitions should be validated.
 
 ## Supported Axisfile Instructions
 
@@ -165,6 +217,9 @@ Parsing uses `shlex.split`, so quoted arguments are supported.
 - Axis must capture runtime stdout/stderr.
 - Axis must support bind-mounting host directories.
 - Axis must restart containers configured with `RESTART always` while `axis run` remains attached.
+- Axis must expose cgroup stats through `axis stats`.
+- Axis must distinguish common exit reasons such as completed, error, signal, stopped, stale PID, and OOM kill when information is available.
+- Axis must support explicit reconciliation for stale PID and proxy metadata.
 
 ## Constraints
 
@@ -172,8 +227,19 @@ Parsing uses `shlex.split`, so quoted arguments are supported.
 - Root required for `axis run`.
 - Docker CLI required for image preparation.
 - No daemon process.
+- `RESTART always` remains foreground-only until `axisd` exists.
 - No OCI image/runtime compatibility claim.
 - Runtime JSON parser is intentionally minimal and expects the shape Python writes.
+
+## Remaining Production Work
+
+- Make cleanup entirely resource-journal driven, including partial network setup rollback.
+- Expand cgroup cleanup and stats tests with root-gated integration cases.
+- Add OOM-specific integration tests and persist final cgroup counters before cgroup removal.
+- Make proxy readiness checks deterministic instead of sleep-based.
+- Add `axis reconcile --repair` for leaked veths, proxies, and stale IP allocations.
+- Add privileged CI or a manual integration suite for namespaces, cgroups, iptables, and OOM behavior.
+- Introduce `axisd` only after lifecycle, resource ownership, cleanup, and reconciliation are stable.
 
 ## Acceptance Checks
 
@@ -181,5 +247,7 @@ Parsing uses `shlex.split`, so quoted arguments are supported.
 - `make test` passes unit tests.
 - `axis inspect <name>` works for a unique container name.
 - `axis logs <name>` prints captured runtime/container output.
+- `axis stats <name>` prints cgroup counters when the cgroup exists.
+- `axis reconcile` exits cleanly and reports stale metadata repairs or root-required repairs.
 - `RESTART always` relaunches after process exit until manual stop.
 - `VOLUME ./data:/data` appears inside the container when the host directory exists.

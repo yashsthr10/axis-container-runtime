@@ -73,13 +73,15 @@ This file describes operator workflows: the commands people run and the side eff
 
 ## WF-006: Stop A Container
 
-- **Trigger**: `axis stop fastapi-demo`
+- **Trigger**: `axis stop [--timeout 30] fastapi-demo`
 - **Entry point**: `stop_command`
 - **Behavior**:
   - Resolves exact ID or unique name.
   - Marks `manual_stop=true`.
-  - Sends `SIGTERM` to the stored PID.
-  - Marks status as `stopped`.
+  - Transitions the container to `stopping`.
+  - Uses cgroup process ownership when available.
+  - Sends `SIGTERM`, waits for the timeout, and escalates to `SIGKILL` if needed.
+  - Transitions to `exited` only after stop is verified or the container is already gone.
   - Prevents a foreground `RESTART always` loop from relaunching.
 
 ## WF-007: Clean Container State
@@ -89,11 +91,45 @@ This file describes operator workflows: the commands people run and the side eff
 - **Behavior**:
   - Stops proxy processes.
   - Cleans network artifacts.
-  - Terminates recorded PID if present.
+  - Terminates cgroup processes or recorded PID if present.
+  - Releases IP allocation when network metadata is available.
+  - Removes cgroup directory when empty.
   - Removes `.axis/containers/<id>/`.
-- **Note**: IP allocations in `.axis/networks/axis0.json` can remain allocated by container ID.
 
-## WF-008: Develop And Test
+## WF-008: Read Stats
+
+- **Trigger**: `axis stats fastapi-demo`
+- **Entry point**: `stats_command`
+- **Behavior**:
+  - Resolves exact ID or unique name.
+  - Reads cgroup v2 counters from the persisted cgroup path.
+  - Prints JSON containing available memory, CPU, PID, IO, and cgroup event counters.
+
+## WF-009: Reconcile State
+
+- **Trigger**: `axis reconcile`
+- **Entry point**: `reconcile_command`
+- **Behavior**:
+  - Scans `.axis/containers/*`.
+  - Marks stale running PIDs as failed when repair is permitted.
+  - Prunes stale proxy PID entries when repair is permitted.
+  - Reports root-required repairs instead of crashing on root-owned state.
+
+## WF-010: Failure Injection
+
+- **Trigger**: `AXIS_FAILPOINT=<name> axis run ...`
+- **Supported failpoints**:
+  - `after-rootfs-create`
+  - `before-runtime-start`
+  - `after-runtime-start`
+  - `after-network-setup`
+  - `after-proxy-start`
+  - `after-veth-create`
+  - `after-iptables`
+  - `after-cgroup-create`
+- **Purpose**: verify partial setup failures do not leak owned resources.
+
+## WF-011: Develop And Test
 
 - **Unit tests**: `make test`
 - **Full discovery**: `python3 -m unittest discover`

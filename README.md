@@ -31,6 +31,7 @@ Then test the HTTP server and bind mount:
 curl http://localhost:8000
 PYTHONPATH=src python3 -m axis.cli inspect fastapi-demo
 PYTHONPATH=src python3 -m axis.cli logs fastapi-demo
+PYTHONPATH=src python3 -m axis.cli stats fastapi-demo
 ```
 
 Test restart policy with the crash-loop example:
@@ -46,6 +47,7 @@ PYTHONPATH=src python3 -m axis.cli stop restart-demo
 ```bash
 make test
 PYTHONPATH=src python3 -m axis.cli ps
+PYTHONPATH=src python3 -m axis.cli reconcile
 PYTHONPATH=src python3 -m axis.cli stop <container>
 PYTHONPATH=src python3 -m axis.cli clean <container>
 ```
